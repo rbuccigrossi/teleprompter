@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Voice-Tracked Teleprompter</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        /* Custom scrollbars */
+        ::-webkit-scrollbar { width: 10px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+        .dark-scroll::-webkit-scrollbar-thumb { background: #475569; }
+        
+        /* Smooth transitions for text highlighting */
+        .word { transition: all 0.2s ease-in-out; cursor: pointer; }
+        .word:hover { text-decoration: underline; text-decoration-color: #facc15; }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-800 font-sans h-screen overflow-hidden flex flex-col">
+
+    <!-- ==================== SETUP VIEW ==================== -->
+    <div id="setupView" class="flex-1 flex flex-col max-w-5xl w-full mx-auto p-4 md:p-8 h-full transition-opacity duration-300">
+        
+        <header class="mb-6">
+            <h1 class="text-3xl font-bold flex items-center gap-3 text-slate-900">
+                <i data-lucide="monitor-play" class="w-8 h-8 text-blue-600"></i>
+                Auto-Scrolling Prompter
+            </h1>
+            <p class="text-slate-500 mt-2 text-lg">Paste your script below. The text will automatically scroll as you speak.</p>
+        </header>
+
+        <div class="flex-1 flex flex-col bg-white rounded-2xl shadow-lg border border-slate-200 overflow-hidden">
+            <div class="bg-slate-100 px-4 py-3 border-b border-slate-200 flex justify-between items-center">
+                <span class="font-semibold text-slate-700">Script Input</span>
+                <button id="clearBtn" class="text-sm text-slate-500 hover:text-red-600 flex items-center gap-1 transition-colors">
+                    <i data-lucide="trash-2" class="w-4 h-4"></i> Clear
+                </button>
+            </div>
+            <textarea id="scriptInput" class="flex-1 p-6 resize-none outline-none text-lg leading-relaxed placeholder-slate-400" placeholder="Paste or type your presentation script here..."></textarea>
+        </div>
+
+        <div class="mt-6 flex flex-col md:flex-row justify-between items-center gap-4">
+            
+            <!-- Configurable Lookahead -->
+            <div class="bg-white px-5 py-3 rounded-xl border border-slate-200 shadow-sm w-full md:w-auto flex-1 max-w-sm">
+                <div class="flex justify-between items-center mb-2">
+                    <label for="lookaheadSlider" class="text-sm font-semibold text-slate-700 flex items-center gap-2">
+                        <i data-lucide="fast-forward" class="w-4 h-4 text-slate-500"></i>
+                        Skip-Ahead Window
+                    </label>
+                    <span id="lookaheadValue" class="text-xs font-bold bg-slate-100 text-slate-600 px-2 py-1 rounded">10 words</span>
+                </div>
+                <input type="range" id="lookaheadSlider" min="3" max="30" value="10" class="w-full accent-blue-600 cursor-pointer">
+                <p class="text-[11px] text-slate-500 mt-1 leading-tight">Lower this in noisy rooms to prevent wild jumps. Raise it if you skip lines.</p>
+            </div>
+
+            <div class="flex items-center gap-4 w-full md:w-auto justify-end">
+                <div id="errorBanner" class="hidden items-center gap-2 text-red-600 bg-red-50 px-4 py-2 rounded-lg font-medium text-sm">
+                    <i data-lucide="alert-circle" class="w-4 h-4"></i>
+                    <span id="errorMessage">Browser not supported.</span>
+                </div>
+                
+                <button id="startBtn" class="bg-blue-600 hover:bg-blue-700 text-white px-8 py-4 rounded-xl font-bold text-lg shadow-md hover:shadow-xl transition-all flex items-center gap-2 transform hover:-translate-y-0.5 shrink-0">
+                    <i data-lucide="play" class="w-5 h-5 fill-current"></i>
+                    Start Prompter
+                </button>
+            </div>
+        </div>
+    </div>
+
+
+    <!-- ==================== PROMPTER VIEW ==================== -->
+    <div id="prompterView" class="hidden absolute inset-0 bg-slate-900 text-slate-200 flex-col h-full w-full z-50">
+        
+        <!-- Controls Header -->
+        <div class="bg-slate-950/80 backdrop-blur-md border-b border-slate-800 p-4 flex items-center justify-between shrink-0 z-10">
+            <button id="stopBtn" class="flex items-center gap-2 text-slate-400 hover:text-white bg-slate-800 hover:bg-slate-700 px-4 py-2 rounded-lg transition-colors font-medium">
+                <i data-lucide="arrow-left" class="w-4 h-4"></i> Stop & Edit
+            </button>
+
+            <div class="flex items-center gap-4">
+                <div id="listeningBadge" class="flex items-center gap-2 px-3 py-1.5 rounded-full bg-red-500/10 text-red-400 text-sm font-medium border border-red-500/20">
+                    <span class="relative flex h-2 w-2">
+                      <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                      <span class="relative inline-flex rounded-full h-2 w-2 bg-red-500"></span>
+                    </span>
+                    Listening
+                </div>
+                
+                <div class="flex items-center gap-1 bg-slate-800 rounded-lg p-1 border border-slate-700">
+                    <button id="fontDownBtn" class="p-2 text-slate-400 hover:text-white hover:bg-slate-700 rounded transition-colors" title="Decrease Font Size">
+                        <i data-lucide="a-large-minus" class="w-5 h-5"></i>
+                    </button>
+                    <div class="w-px h-5 bg-slate-600 mx-1"></div>
+                    <button id="fontUpBtn" class="p-2 text-slate-400 hover:text-white hover:bg-slate-700 rounded transition-colors" title="Increase Font Size">
+                        <i data-lucide="a-large-plus" class="w-5 h-5"></i>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Scrollable Teleprompter Content -->
+        <div id="prompterContent" class="flex-1 overflow-y-auto dark-scroll relative p-8 md:p-16 lg:px-32 lg:py-24 scroll-smooth">
+            <div id="textContainer" class="max-w-5xl mx-auto leading-normal tracking-wide" style="font-size: 48px;">
+                <!-- Script injected here -->
+            </div>
+            <!-- Bottom padding to allow the last line to scroll up -->
+            <div class="h-[60vh]"></div> 
+        </div>
+
+    </div>
+
+    <script>
+        lucide.createIcons();
+
+        // DOM Elements
+        const setupView = document.getElementById('setupView');
+        const prompterView = document.getElementById('prompterView');
+        const scriptInput = document.getElementById('scriptInput');
+        const startBtn = document.getElementById('startBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        const clearBtn = document.getElementById('clearBtn');
+        const textContainer = document.getElementById('textContainer');
+        const prompterContent = document.getElementById('prompterContent');
+        const fontUpBtn = document.getElementById('fontUpBtn');
+        const fontDownBtn = document.getElementById('fontDownBtn');
+        const errorBanner = document.getElementById('errorBanner');
+        const errorMessage = document.getElementById('errorMessage');
+        const lookaheadSlider = document.getElementById('lookaheadSlider');
+        const lookaheadValue = document.getElementById('lookaheadValue');
+
+        // State Variables
+        let scriptData = [];      // Holds cleaned words for searching
+        let currentIndex = 0;     // Current word index we are on
+        let currentFontSize = 48; // Default font size
+        let isRecording = false;  // Speech API state
+        let recognition = null;
+        let LOOKAHEAD_WINDOW = 10; // Configurable: How many words ahead to search for a match
+
+        // 1. Initialize Speech Recognition
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        
+        if (!SpeechRecognition) {
+            startBtn.disabled = true;
+            startBtn.classList.add('opacity-50', 'cursor-not-allowed');
+            errorMessage.textContent = "Your browser does not support Speech Recognition. Use Chrome or Safari.";
+            errorBanner.classList.replace('hidden', 'flex');
+        } else {
+            recognition = new SpeechRecognition();
+            recognition.continuous = true;
+            recognition.interimResults = true; // Crucial for real-time tracking
+            recognition.lang = 'en-US';
+
+            recognition.onresult = (event) => {
+                // Get the latest block of speech from the engine
+                let latestTranscript = event.results[event.results.length - 1][0].transcript;
+                
+                // Break spoken text into an array of cleaned words
+                let spokenWords = latestTranscript
+                    .split(/\s+/)
+                    .map(w => w.toLowerCase().replace(/[^a-z0-9]/g, ''))
+                    .filter(w => w.length > 0);
+
+                if (spokenWords.length === 0) return;
+
+                // --- The Sliding Window Matcher (Upgraded) ---
+                
+                // 1. Lookbehind Buffer: 
+                // Interim results often repeat words we've *just* passed. 
+                // By starting our search slightly before our current position, 
+                // we "consume" these repeated words without falsely jumping ahead.
+                const LOOKBEHIND = 10;
+                let searchStartIndex = Math.max(0, currentIndex - LOOKBEHIND);
+                
+                let potentialNewIndex = currentIndex;
+
+                // 2. Stop-Word Jump Protection:
+                // Expanded list to include common pronouns and prepositions
+                const STOP_WORDS = new Set([
+                    'the', 'a', 'an', 'to', 'and', 'or', 'of', 'in', 'on', 'is', 'it', 
+                    'for', 'with', 'you', 'i', 'we', 'this', 'that', 'are', 'your', 'be', 'as', 'at'
+                ]);
+                let currentLookahead = LOOKAHEAD_WINDOW;
+                
+                if (spokenWords.length === 1 && STOP_WORDS.has(spokenWords[0])) {
+                    currentLookahead = 3; // Max 3 words ahead for solitary stop words
+                }
+
+                for (let sw of spokenWords) {
+                    if (!sw) continue;
+                    
+                    // THE FIX: Limit the max search index properly.
+                    // Previously, LOOKBEHIND was added to the forward window, giving it a massive 
+                    // allowed jump radius for every single word in an interim phrase.
+                    // Now, we strictly limit the forward search to `currentLookahead` from our current spot.
+                    let maxAllowedForward = Math.max(currentIndex + currentLookahead, searchStartIndex + 3);
+                    let maxSearchIndex = Math.min(maxAllowedForward, scriptData.length);
+                    
+                    for (let i = searchStartIndex; i < maxSearchIndex; i++) {
+                        // Match against the full cleaned word OR any sub-words (to catch hyphenated parts)
+                        if (sw === scriptData[i].clean || scriptData[i].cleanParts.includes(sw)) {
+                            potentialNewIndex = i;
+                            searchStartIndex = i + 1; // Require the *next* spoken word to be further down
+                            break; // Move to processing the next spoken word
+                        }
+                    }
+                }
+
+                // 3. Commit the change only if we moved forward
+                // (Prevents the prompter from jittering backwards while speaking)
+                if (potentialNewIndex > currentIndex) {
+                    currentIndex = potentialNewIndex;
+                    updateHighlight(currentIndex);
+                }
+            };
+
+            recognition.onerror = (event) => {
+                console.warn("Speech Recognition Error:", event.error);
+                if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
+                    alert("Microphone access is required for the prompter to track your voice.");
+                    exitPrompter();
+                }
+            };
+
+            // Handle API timeouts gracefully (auto-resume)
+            recognition.onend = () => {
+                if (isRecording) {
+                    try { recognition.start(); } catch (e) { console.error(e); }
+                }
+            };
+        }
+
+        // 2. Formatting & Parsing the Script
+        function preparePrompterText(rawText) {
+            scriptData = [];
+            let wordIndex = 0;
+            let htmlOutput = '';
+            
+            // Split by paragraphs to maintain structure
+            const paragraphs = rawText.split(/\n+/);
+            
+            paragraphs.forEach(p => {
+                if(!p.trim()) return;
+                
+                htmlOutput += '<p class="mb-8 text-slate-300 transition-colors duration-300">';
+                const words = p.split(/\s+/).filter(w => w.length > 0);
+                
+                words.forEach(w => {
+                    scriptData.push({
+                        id: wordIndex,
+                        clean: w.toLowerCase().replace(/[^a-z0-9]/g, ''),
+                        cleanParts: w.toLowerCase().split(/[^a-z0-9]+/).filter(x => x.length > 0)
+                    });
+                    
+                    // Create a span for every word for precise targeting
+                    htmlOutput += `<span id="word-${wordIndex}" class="word inline-block">${w}</span> `;
+                    wordIndex++;
+                });
+                htmlOutput += '</p>';
+            });
+
+            textContainer.innerHTML = htmlOutput;
+        }
+
+        // 3. Highlighting and Auto-Scrolling Logic
+        function updateHighlight(index) {
+            if (index >= scriptData.length) return;
+
+            // Update visual states of all words up to the current index
+            // (In a very long script, optimizing this loop is good, but standard lengths are fine)
+            for (let i = Math.max(0, index - LOOKAHEAD_WINDOW * 2); i <= index + 5; i++) {
+                let el = document.getElementById(`word-${i}`);
+                if (!el) continue;
+
+                if (i < index) {
+                    // Past words: dim them
+                    el.className = 'word inline-block opacity-30 text-slate-400';
+                } else if (i === index) {
+                    // Current word: Bright yellow, bold
+                    el.className = 'word inline-block text-yellow-400 font-bold scale-105 transform origin-left';
+                } else {
+                    // Future words: Normal
+                    el.className = 'word inline-block opacity-100 text-slate-200';
+                }
+            }
+
+            // --- Scroll Logic ---
+            const targetEl = document.getElementById(`word-${index}`);
+            if (targetEl) {
+                // Determine container height to calculate a 25% top offset
+                const offset = prompterContent.clientHeight * 0.25;
+                
+                // targetEl.offsetTop works reliably here because textContainer is standard document flow
+                prompterContent.scrollTo({
+                    top: targetEl.offsetTop - offset,
+                    behavior: 'smooth'
+                });
+            }
+        }
+
+        // 4. UI Actions & Flow control
+        
+        startBtn.addEventListener('click', () => {
+            const text = scriptInput.value;
+            if (!text.trim()) {
+                alert("Please enter a script first.");
+                return;
+            }
+
+            preparePrompterText(text);
+            currentIndex = 0;
+            
+            // Toggle Views
+            setupView.classList.add('hidden');
+            prompterView.classList.replace('hidden', 'flex');
+            
+            // Start Voice Tracking
+            isRecording = true;
+            try { recognition.start(); } catch(e) {}
+            
+            // Highlight the first word and scroll to top
+            setTimeout(() => {
+                updateHighlight(0);
+                prompterContent.scrollTop = 0;
+            }, 100);
+        });
+
+        function exitPrompter() {
+            isRecording = false;
+            try { recognition.stop(); } catch(e) {}
+            
+            prompterView.classList.replace('flex', 'hidden');
+            setupView.classList.remove('hidden');
+        }
+
+        stopBtn.addEventListener('click', exitPrompter);
+
+        clearBtn.addEventListener('click', () => {
+            scriptInput.value = '';
+            scriptInput.focus();
+        });
+
+        // Feature: Click any word to jump to it manually!
+        textContainer.addEventListener('click', (e) => {
+            if (e.target.classList.contains('word')) {
+                const idStr = e.target.id; 
+                currentIndex = parseInt(idStr.replace('word-', ''));
+                updateHighlight(currentIndex);
+            }
+        });
+
+        // Font Size Controls
+        fontUpBtn.addEventListener('click', () => {
+            if (currentFontSize < 120) currentFontSize += 8;
+            textContainer.style.fontSize = `${currentFontSize}px`;
+            updateHighlight(currentIndex); // Recalculate scroll position
+        });
+
+        fontDownBtn.addEventListener('click', () => {
+            if (currentFontSize > 24) currentFontSize -= 8;
+            textContainer.style.fontSize = `${currentFontSize}px`;
+            updateHighlight(currentIndex); // Recalculate scroll position
+        });
+
+        // Config Listener
+        lookaheadSlider.addEventListener('input', (e) => {
+            LOOKAHEAD_WINDOW = parseInt(e.target.value);
+            lookaheadValue.textContent = `${LOOKAHEAD_WINDOW} words`;
+        });
+
+        // Add some dummy script data for easy testing
+        scriptInput.value = `Welcome to the Voice-Tracked Teleprompter!
+
+Go ahead and press the play button. As you read these words out loud, the application will listen to your voice and automatically scroll the page for you.
+
+If you skip a word, or even skip a whole sentence, the application looks ahead to find where you are.
+
+Try clicking on any word in the text to manually jump forward or backward. You can also adjust the text size using the buttons in the top right. Good luck with your presentation!`;
+
+    </script>
+</body>
+</html>
