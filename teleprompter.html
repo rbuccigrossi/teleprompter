@@ -176,26 +176,12 @@
                 
                 let potentialNewIndex = currentIndex;
 
-                // 2. Stop-Word Jump Protection:
-                // Expanded list to include common pronouns and prepositions
-                const STOP_WORDS = new Set([
-                    'the', 'a', 'an', 'to', 'and', 'or', 'of', 'in', 'on', 'is', 'it', 
-                    'for', 'with', 'you', 'i', 'we', 'this', 'that', 'are', 'your', 'be', 'as', 'at'
-                ]);
-                let currentLookahead = LOOKAHEAD_WINDOW;
-                
-                if (spokenWords.length === 1 && STOP_WORDS.has(spokenWords[0])) {
-                    currentLookahead = 3; // Max 3 words ahead for solitary stop words
-                }
-
                 for (let sw of spokenWords) {
                     if (!sw) continue;
                     
-                    // THE FIX: Limit the max search index properly.
-                    // Previously, LOOKBEHIND was added to the forward window, giving it a massive 
-                    // allowed jump radius for every single word in an interim phrase.
-                    // Now, we strictly limit the forward search to `currentLookahead` from our current spot.
-                    let maxAllowedForward = Math.max(currentIndex + currentLookahead, searchStartIndex + 3);
+                    // Limit the max search index properly.
+                    // We strictly limit the forward search to `LOOKAHEAD_WINDOW` from our current spot.
+                    let maxAllowedForward = Math.max(currentIndex + LOOKAHEAD_WINDOW, searchStartIndex + 3);
                     let maxSearchIndex = Math.min(maxAllowedForward, scriptData.length);
                     
                     for (let i = searchStartIndex; i < maxSearchIndex; i++) {
@@ -278,8 +264,8 @@
                     // Past words: dim them
                     el.className = 'word inline-block opacity-30 text-slate-400';
                 } else if (i === index) {
-                    // Current word: Bright yellow, bold
-                    el.className = 'word inline-block text-yellow-400 font-bold scale-105 transform origin-left';
+                    // Current word: Bright yellow, bold removed to prevent text shifting
+                    el.className = 'word inline-block text-yellow-400 scale-105 transform origin-left';
                 } else {
                     // Future words: Normal
                     el.className = 'word inline-block opacity-100 text-slate-200';
