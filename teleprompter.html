@@ -56,22 +56,16 @@
                 <p class="text-[11px] text-slate-500 mt-1 leading-tight">Lower this in noisy rooms to prevent wild jumps. Raise it if you skip lines.</p>
             </div>
 
-            <!-- Matching Toggles -->
-            <div class="bg-white px-5 py-3 rounded-xl border border-slate-200 shadow-sm w-full md:w-auto flex flex-col justify-center gap-2">
-                <div class="flex items-center justify-between gap-4">
-                    <label for="ngramToggle" class="text-sm font-semibold text-slate-700 flex items-center gap-2 cursor-pointer">
+            <!-- Matching Settings -->
+            <div class="bg-white px-5 py-3 rounded-xl border border-slate-200 shadow-sm w-full md:w-auto flex flex-col justify-center gap-2 min-w-[200px]">
+                <div class="flex justify-between items-center mb-1">
+                    <label for="ngramSlider" class="text-sm font-semibold text-slate-700 flex items-center gap-2">
                         <i data-lucide="layers" class="w-4 h-4 text-slate-500"></i>
-                        N-gram Matching
+                        Phrase Length
                     </label>
-                    <input type="checkbox" id="ngramToggle" checked class="w-4 h-4 accent-blue-600 cursor-pointer">
+                    <span id="ngramValue" class="text-xs font-bold bg-slate-100 text-slate-600 px-2 py-1 rounded">3 words</span>
                 </div>
-                <div class="flex items-center justify-between gap-4">
-                    <label for="fuzzyToggle" class="text-sm font-semibold text-slate-700 flex items-center gap-2 cursor-pointer">
-                        <i data-lucide="search-code" class="w-4 h-4 text-slate-500"></i>
-                        Fuzzy Matching
-                    </label>
-                    <input type="checkbox" id="fuzzyToggle" checked class="w-4 h-4 accent-blue-600 cursor-pointer">
-                </div>
+                <input type="range" id="ngramSlider" min="1" max="5" value="3" class="w-full accent-blue-600 cursor-pointer">
             </div>
 
             <div class="flex items-center gap-4 w-full md:w-auto justify-end">
@@ -148,8 +142,8 @@
         const errorMessage = document.getElementById('errorMessage');
         const lookaheadSlider = document.getElementById('lookaheadSlider');
         const lookaheadValue = document.getElementById('lookaheadValue');
-        const ngramToggle = document.getElementById('ngramToggle');
-        const fuzzyToggle = document.getElementById('fuzzyToggle');
+        const ngramSlider = document.getElementById('ngramSlider');
+        const ngramValue = document.getElementById('ngramValue');
 
         // State Variables
         let scriptData = [];      // Holds cleaned words for searching
@@ -158,43 +152,7 @@
         let isRecording = false;  // Speech API state
         let recognition = null;
         let LOOKAHEAD_WINDOW = 10; // Configurable: How many words ahead to search for a match
-        let useNgram = true;      // Use trigrams/bigrams for better matching
-        let useFuzzy = true;      // Use Levenshtein distance for fuzzy matching
-
-        // Utility: Levenshtein Distance for fuzzy matching
-        function levenshtein(a, b) {
-            if (a.length === 0) return b.length;
-            if (b.length === 0) return a.length;
-            const matrix = [];
-            for (let i = 0; i <= b.length; i++) matrix[i] = [i];
-            for (let j = 0; j <= a.length; j++) matrix[0][j] = j;
-            for (let i = 1; i <= b.length; i++) {
-                for (let j = 1; j <= a.length; j++) {
-                    if (b.charAt(i - 1) === a.charAt(j - 1)) {
-                        matrix[i][j] = matrix[i - 1][j - 1];
-                    } else {
-                        matrix[i][j] = Math.min(
-                            matrix[i - 1][j - 1] + 1,
-                            Math.min(matrix[i][j - 1] + 1, matrix[i - 1][j] + 1)
-                        );
-                    }
-                }
-            }
-            return matrix[b.length][a.length];
-        }
-
-        // Utility: Check if two strings match (optionally fuzzy)
-        function isMatch(s1, s2) {
-            if (!s1 || !s2) return false;
-            if (!useFuzzy) return s1 === s2;
-
-            // For very short words, require exact match
-            if (s1.length <= 3 || s2.length <= 3) return s1 === s2;
-
-            const dist = levenshtein(s1, s2);
-            const threshold = Math.floor(Math.min(s1.length, s2.length) * 0.25); // Allow 25% difference
-            return dist <= threshold;
-        }
+        let MAX_NGRAM = 3;        // Configurable: Match up to this many words at once
 
         // 1. Initialize Speech Recognition
         const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -222,7 +180,7 @@
 
                 if (spokenWords.length === 0) return;
 
-                // --- The Sliding Window Matcher (v2: N-gram + Fuzzy) ---
+                // --- The Sliding Window Matcher (v3: Variable N-gram) ---
                 
                 const LOOKBEHIND = 10;
                 let searchStartIndex = Math.max(0, currentIndex - LOOKBEHIND);
@@ -234,10 +192,8 @@
                     
                     let matchFound = false;
 
-                    // Try matching N-grams (trigrams, then bigrams, then unigrams)
-                    const nSizes = useNgram ? [3, 2, 1] : [1];
-
-                    for (let n of nSizes) {
+                    // Try matching N-grams from MAX_NGRAM down to 1
+                    for (let n = MAX_NGRAM; n >= 1; n--) {
                         if (wordIdx + n > spokenWords.length) continue;
 
                         let spokenPhrase = spokenWords.slice(wordIdx, wordIdx + n).join('');
@@ -248,7 +204,7 @@
                                 scriptPhrase += scriptData[i+j].clean;
                             }
 
-                            if (isMatch(spokenPhrase, scriptPhrase)) {
+                            if (spokenPhrase === scriptPhrase) {
                                 potentialNewIndex = i + n - 1;
                                 searchStartIndex = i + n;
                                 wordIdx += n - 1; // Skip the words we just matched
@@ -263,7 +219,7 @@
                     if (!matchFound) {
                         let sw = spokenWords[wordIdx];
                         for (let i = searchStartIndex; i < maxSearchIndex; i++) {
-                            if (scriptData[i].cleanParts.some(part => isMatch(sw, part))) {
+                            if (scriptData[i].cleanParts.includes(sw)) {
                                 potentialNewIndex = i;
                                 searchStartIndex = i + 1;
                                 matchFound = true;
@@ -434,12 +390,9 @@
             lookaheadValue.textContent = `${LOOKAHEAD_WINDOW} words`;
         });
 
-        ngramToggle.addEventListener('change', (e) => {
-            useNgram = e.target.checked;
-        });
-
-        fuzzyToggle.addEventListener('change', (e) => {
-            useFuzzy = e.target.checked;
+        ngramSlider.addEventListener('input', (e) => {
+            MAX_NGRAM = parseInt(e.target.value);
+            ngramValue.textContent = `${MAX_NGRAM} word${MAX_NGRAM !== 1 ? 's' : ''}`;
         });
 
         // Add some dummy script data for easy testing
