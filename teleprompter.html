@@ -56,6 +56,24 @@
                 <p class="text-[11px] text-slate-500 mt-1 leading-tight">Lower this in noisy rooms to prevent wild jumps. Raise it if you skip lines.</p>
             </div>
 
+            <!-- Matching Toggles -->
+            <div class="bg-white px-5 py-3 rounded-xl border border-slate-200 shadow-sm w-full md:w-auto flex flex-col justify-center gap-2">
+                <div class="flex items-center justify-between gap-4">
+                    <label for="ngramToggle" class="text-sm font-semibold text-slate-700 flex items-center gap-2 cursor-pointer">
+                        <i data-lucide="layers" class="w-4 h-4 text-slate-500"></i>
+                        N-gram Matching
+                    </label>
+                    <input type="checkbox" id="ngramToggle" checked class="w-4 h-4 accent-blue-600 cursor-pointer">
+                </div>
+                <div class="flex items-center justify-between gap-4">
+                    <label for="fuzzyToggle" class="text-sm font-semibold text-slate-700 flex items-center gap-2 cursor-pointer">
+                        <i data-lucide="search-code" class="w-4 h-4 text-slate-500"></i>
+                        Fuzzy Matching
+                    </label>
+                    <input type="checkbox" id="fuzzyToggle" checked class="w-4 h-4 accent-blue-600 cursor-pointer">
+                </div>
+            </div>
+
             <div class="flex items-center gap-4 w-full md:w-auto justify-end">
                 <div id="errorBanner" class="hidden items-center gap-2 text-red-600 bg-red-50 px-4 py-2 rounded-lg font-medium text-sm">
                     <i data-lucide="alert-circle" class="w-4 h-4"></i>
@@ -130,6 +148,8 @@
         const errorMessage = document.getElementById('errorMessage');
         const lookaheadSlider = document.getElementById('lookaheadSlider');
         const lookaheadValue = document.getElementById('lookaheadValue');
+        const ngramToggle = document.getElementById('ngramToggle');
+        const fuzzyToggle = document.getElementById('fuzzyToggle');
 
         // State Variables
         let scriptData = [];      // Holds cleaned words for searching
@@ -138,6 +158,43 @@
         let isRecording = false;  // Speech API state
         let recognition = null;
         let LOOKAHEAD_WINDOW = 10; // Configurable: How many words ahead to search for a match
+        let useNgram = true;      // Use trigrams/bigrams for better matching
+        let useFuzzy = true;      // Use Levenshtein distance for fuzzy matching
+
+        // Utility: Levenshtein Distance for fuzzy matching
+        function levenshtein(a, b) {
+            if (a.length === 0) return b.length;
+            if (b.length === 0) return a.length;
+            const matrix = [];
+            for (let i = 0; i <= b.length; i++) matrix[i] = [i];
+            for (let j = 0; j <= a.length; j++) matrix[0][j] = j;
+            for (let i = 1; i <= b.length; i++) {
+                for (let j = 1; j <= a.length; j++) {
+                    if (b.charAt(i - 1) === a.charAt(j - 1)) {
+                        matrix[i][j] = matrix[i - 1][j - 1];
+                    } else {
+                        matrix[i][j] = Math.min(
+                            matrix[i - 1][j - 1] + 1,
+                            Math.min(matrix[i][j - 1] + 1, matrix[i - 1][j] + 1)
+                        );
+                    }
+                }
+            }
+            return matrix[b.length][a.length];
+        }
+
+        // Utility: Check if two strings match (optionally fuzzy)
+        function isMatch(s1, s2) {
+            if (!s1 || !s2) return false;
+            if (!useFuzzy) return s1 === s2;
+
+            // For very short words, require exact match
+            if (s1.length <= 3 || s2.length <= 3) return s1 === s2;
+
+            const dist = levenshtein(s1, s2);
+            const threshold = Math.floor(Math.min(s1.length, s2.length) * 0.25); // Allow 25% difference
+            return dist <= threshold;
+        }
 
         // 1. Initialize Speech Recognition
         const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -165,37 +222,58 @@
 
                 if (spokenWords.length === 0) return;
 
-                // --- The Sliding Window Matcher (Upgraded) ---
+                // --- The Sliding Window Matcher (v2: N-gram + Fuzzy) ---
                 
-                // 1. Lookbehind Buffer: 
-                // Interim results often repeat words we've *just* passed. 
-                // By starting our search slightly before our current position, 
-                // we "consume" these repeated words without falsely jumping ahead.
                 const LOOKBEHIND = 10;
                 let searchStartIndex = Math.max(0, currentIndex - LOOKBEHIND);
-                
                 let potentialNewIndex = currentIndex;
 
-                for (let sw of spokenWords) {
-                    if (!sw) continue;
-                    
-                    // Limit the max search index properly.
-                    // We strictly limit the forward search to `LOOKAHEAD_WINDOW` from our current spot.
+                for (let wordIdx = 0; wordIdx < spokenWords.length; wordIdx++) {
                     let maxAllowedForward = Math.max(currentIndex + LOOKAHEAD_WINDOW, searchStartIndex + 3);
                     let maxSearchIndex = Math.min(maxAllowedForward, scriptData.length);
                     
-                    for (let i = searchStartIndex; i < maxSearchIndex; i++) {
-                        // Match against the full cleaned word OR any sub-words (to catch hyphenated parts)
-                        if (sw === scriptData[i].clean || scriptData[i].cleanParts.includes(sw)) {
-                            potentialNewIndex = i;
-                            searchStartIndex = i + 1; // Require the *next* spoken word to be further down
-                            break; // Move to processing the next spoken word
+                    let matchFound = false;
+
+                    // Try matching N-grams (trigrams, then bigrams, then unigrams)
+                    const nSizes = useNgram ? [3, 2, 1] : [1];
+
+                    for (let n of nSizes) {
+                        if (wordIdx + n > spokenWords.length) continue;
+
+                        let spokenPhrase = spokenWords.slice(wordIdx, wordIdx + n).join('');
+
+                        for (let i = searchStartIndex; i <= maxSearchIndex - n; i++) {
+                            let scriptPhrase = "";
+                            for(let j = 0; j < n; j++) {
+                                scriptPhrase += scriptData[i+j].clean;
+                            }
+
+                            if (isMatch(spokenPhrase, scriptPhrase)) {
+                                potentialNewIndex = i + n - 1;
+                                searchStartIndex = i + n;
+                                wordIdx += n - 1; // Skip the words we just matched
+                                matchFound = true;
+                                break;
+                            }
+                        }
+                        if (matchFound) break;
+                    }
+
+                    // Fallback: Check sub-words (for hyphenated script words)
+                    if (!matchFound) {
+                        let sw = spokenWords[wordIdx];
+                        for (let i = searchStartIndex; i < maxSearchIndex; i++) {
+                            if (scriptData[i].cleanParts.some(part => isMatch(sw, part))) {
+                                potentialNewIndex = i;
+                                searchStartIndex = i + 1;
+                                matchFound = true;
+                                break;
+                            }
                         }
                     }
                 }
 
                 // 3. Commit the change only if we moved forward
-                // (Prevents the prompter from jittering backwards while speaking)
                 if (potentialNewIndex > currentIndex) {
                     currentIndex = potentialNewIndex;
                     updateHighlight(currentIndex);
@@ -350,10 +428,18 @@
             updateHighlight(currentIndex); // Recalculate scroll position
         });
 
-        // Config Listener
+        // Config Listeners
         lookaheadSlider.addEventListener('input', (e) => {
             LOOKAHEAD_WINDOW = parseInt(e.target.value);
             lookaheadValue.textContent = `${LOOKAHEAD_WINDOW} words`;
+        });
+
+        ngramToggle.addEventListener('change', (e) => {
+            useNgram = e.target.checked;
+        });
+
+        fuzzyToggle.addEventListener('change', (e) => {
+            useFuzzy = e.target.checked;
         });
 
         // Add some dummy script data for easy testing
