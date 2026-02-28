@@ -170,7 +170,9 @@
 
             recognition.onresult = (event) => {
                 // Get the latest block of speech from the engine
-                let latestTranscript = event.results[event.results.length - 1][0].transcript;
+                let result = event.results[event.results.length - 1];
+                let latestTranscript = result[0].transcript;
+                let isFinal = result.isFinal;
                 
                 // Break spoken text into an array of cleaned words
                 let spokenWords = latestTranscript
@@ -192,8 +194,11 @@
                     
                     let matchFound = false;
 
-                    // Try matching N-grams from MAX_NGRAM down to 1
-                    for (let n = MAX_NGRAM; n >= 1; n--) {
+                    // Only allow shorter-than-max matching if the speech is final
+                    let minN = (isFinal || MAX_NGRAM === 1) ? 1 : MAX_NGRAM;
+
+                    // Try matching N-grams from MAX_NGRAM down to minN
+                    for (let n = MAX_NGRAM; n >= minN; n--) {
                         if (wordIdx + n > spokenWords.length) continue;
 
                         let spokenPhrase = spokenWords.slice(wordIdx, wordIdx + n).join('');
@@ -215,8 +220,8 @@
                         if (matchFound) break;
                     }
 
-                    // Fallback: Check sub-words (for hyphenated script words)
-                    if (!matchFound) {
+                    // Fallback: Check sub-words (only if final or phrase length is 1)
+                    if (!matchFound && (isFinal || MAX_NGRAM === 1)) {
                         let sw = spokenWords[wordIdx];
                         for (let i = searchStartIndex; i < maxSearchIndex; i++) {
                             if (scriptData[i].cleanParts.includes(sw)) {
