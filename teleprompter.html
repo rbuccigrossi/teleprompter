@@ -169,39 +169,41 @@
             recognition.lang = 'en-US';
 
             recognition.onresult = (event) => {
-                // Get the latest block of speech from the engine
-                let result = event.results[event.results.length - 1];
-                let latestTranscript = result[0].transcript;
-                let isFinal = result.isFinal;
-                
-                // Break spoken text into an array of cleaned words
-                let spokenWords = latestTranscript
-                    .split(/\s+/)
-                    .map(w => w.toLowerCase().replace(/[^a-z0-9]/g, ''))
-                    .filter(w => w.length > 0);
+                // To support multi-result phrase matching, aggregate words from recent segments
+                let allSpokenWords = [];
+                // We look at the last few results to catch phrases split by pauses
+                const resultWindow = Math.min(event.results.length, 5);
+                for (let i = event.results.length - resultWindow; i < event.results.length; i++) {
+                    const transcript = event.results[i][0].transcript;
+                    const words = transcript.split(/\s+/)
+                        .map(w => w.toLowerCase().replace(/[^a-z0-9]/g, ''))
+                        .filter(w => w.length > 0);
+                    allSpokenWords.push(...words);
+                }
 
-                if (spokenWords.length === 0) return;
+                if (allSpokenWords.length === 0) return;
 
-                // --- The Sliding Window Matcher (v3: Variable N-gram) ---
+                // --- The Sliding Window Matcher (v4: Strict N-gram) ---
                 
                 const LOOKBEHIND = 10;
                 let searchStartIndex = Math.max(0, currentIndex - LOOKBEHIND);
                 let potentialNewIndex = currentIndex;
 
-                for (let wordIdx = 0; wordIdx < spokenWords.length; wordIdx++) {
+                for (let wordIdx = 0; wordIdx < allSpokenWords.length; wordIdx++) {
                     let maxAllowedForward = Math.max(currentIndex + LOOKAHEAD_WINDOW, searchStartIndex + 3);
                     let maxSearchIndex = Math.min(maxAllowedForward, scriptData.length);
                     
                     let matchFound = false;
 
-                    // Only allow shorter-than-max matching if the speech is final
-                    let minN = (isFinal || MAX_NGRAM === 1) ? 1 : MAX_NGRAM;
+                    // Calculate minN: strictly MAX_NGRAM, unless we're near the end of the script
+                    let wordsRemaining = scriptData.length - searchStartIndex;
+                    let minN = Math.min(MAX_NGRAM, wordsRemaining);
 
                     // Try matching N-grams from MAX_NGRAM down to minN
                     for (let n = MAX_NGRAM; n >= minN; n--) {
-                        if (wordIdx + n > spokenWords.length) continue;
+                        if (wordIdx + n > allSpokenWords.length) continue;
 
-                        let spokenPhrase = spokenWords.slice(wordIdx, wordIdx + n).join('');
+                        let spokenPhrase = allSpokenWords.slice(wordIdx, wordIdx + n).join('');
 
                         for (let i = searchStartIndex; i <= maxSearchIndex - n; i++) {
                             let scriptPhrase = "";
@@ -220,9 +222,9 @@
                         if (matchFound) break;
                     }
 
-                    // Fallback: Check sub-words (only if final or phrase length is 1)
-                    if (!matchFound && (isFinal || MAX_NGRAM === 1)) {
-                        let sw = spokenWords[wordIdx];
+                    // Fallback: Check sub-words (only if we're near the end or phrase length is 1)
+                    if (!matchFound && minN === 1) {
+                        let sw = allSpokenWords[wordIdx];
                         for (let i = searchStartIndex; i < maxSearchIndex; i++) {
                             if (scriptData[i].cleanParts.includes(sw)) {
                                 potentialNewIndex = i;
