@@ -190,6 +190,8 @@
                 let potentialNewIndex = currentIndex;
 
                 for (let wordIdx = 0; wordIdx < allSpokenWords.length; wordIdx++) {
+                    if (searchStartIndex >= scriptData.length) break;
+
                     let maxAllowedForward = Math.max(currentIndex + LOOKAHEAD_WINDOW, searchStartIndex + 3);
                     let maxSearchIndex = Math.min(maxAllowedForward, scriptData.length);
                     
@@ -197,7 +199,7 @@
 
                     // Calculate minN: strictly MAX_NGRAM, unless we're near the end of the script
                     let wordsRemaining = scriptData.length - searchStartIndex;
-                    let minN = Math.min(MAX_NGRAM, wordsRemaining);
+                    let minN = Math.max(1, Math.min(MAX_NGRAM, wordsRemaining));
 
                     // Try matching N-grams from MAX_NGRAM down to minN
                     for (let n = MAX_NGRAM; n >= minN; n--) {
