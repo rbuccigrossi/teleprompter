@@ -56,6 +56,18 @@
                 <p class="text-[11px] text-slate-500 mt-1 leading-tight">Lower this in noisy rooms to prevent wild jumps. Raise it if you skip lines.</p>
             </div>
 
+            <!-- Matching Settings -->
+            <div class="bg-white px-5 py-3 rounded-xl border border-slate-200 shadow-sm w-full md:w-auto flex flex-col justify-center gap-2 min-w-[200px]">
+                <div class="flex justify-between items-center mb-1">
+                    <label for="ngramSlider" class="text-sm font-semibold text-slate-700 flex items-center gap-2">
+                        <i data-lucide="layers" class="w-4 h-4 text-slate-500"></i>
+                        Phrase Length
+                    </label>
+                    <span id="ngramValue" class="text-xs font-bold bg-slate-100 text-slate-600 px-2 py-1 rounded">3 words</span>
+                </div>
+                <input type="range" id="ngramSlider" min="1" max="5" value="3" class="w-full accent-blue-600 cursor-pointer">
+            </div>
+
             <div class="flex items-center gap-4 w-full md:w-auto justify-end">
                 <div id="errorBanner" class="hidden items-center gap-2 text-red-600 bg-red-50 px-4 py-2 rounded-lg font-medium text-sm">
                     <i data-lucide="alert-circle" class="w-4 h-4"></i>
@@ -130,6 +142,8 @@
         const errorMessage = document.getElementById('errorMessage');
         const lookaheadSlider = document.getElementById('lookaheadSlider');
         const lookaheadValue = document.getElementById('lookaheadValue');
+        const ngramSlider = document.getElementById('ngramSlider');
+        const ngramValue = document.getElementById('ngramValue');
 
         // State Variables
         let scriptData = [];      // Holds cleaned words for searching
@@ -138,6 +152,7 @@
         let isRecording = false;  // Speech API state
         let recognition = null;
         let LOOKAHEAD_WINDOW = 10; // Configurable: How many words ahead to search for a match
+        let MAX_NGRAM = 3;        // Configurable: Match up to this many words at once
 
         // 1. Initialize Speech Recognition
         const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -154,48 +169,76 @@
             recognition.lang = 'en-US';
 
             recognition.onresult = (event) => {
-                // Get the latest block of speech from the engine
-                let latestTranscript = event.results[event.results.length - 1][0].transcript;
-                
-                // Break spoken text into an array of cleaned words
-                let spokenWords = latestTranscript
-                    .split(/\s+/)
-                    .map(w => w.toLowerCase().replace(/[^a-z0-9]/g, ''))
-                    .filter(w => w.length > 0);
+                // To support multi-result phrase matching, aggregate words from recent segments
+                let allSpokenWords = [];
+                // We look at the last few results to catch phrases split by pauses
+                const resultWindow = Math.min(event.results.length, 5);
+                for (let i = event.results.length - resultWindow; i < event.results.length; i++) {
+                    const transcript = event.results[i][0].transcript;
+                    const words = transcript.split(/\s+/)
+                        .map(w => w.toLowerCase().replace(/[^a-z0-9]/g, ''))
+                        .filter(w => w.length > 0);
+                    allSpokenWords.push(...words);
+                }
 
-                if (spokenWords.length === 0) return;
+                if (allSpokenWords.length === 0) return;
 
-                // --- The Sliding Window Matcher (Upgraded) ---
+                // --- The Sliding Window Matcher (v4: Strict N-gram) ---
                 
-                // 1. Lookbehind Buffer: 
-                // Interim results often repeat words we've *just* passed. 
-                // By starting our search slightly before our current position, 
-                // we "consume" these repeated words without falsely jumping ahead.
                 const LOOKBEHIND = 10;
                 let searchStartIndex = Math.max(0, currentIndex - LOOKBEHIND);
-                
                 let potentialNewIndex = currentIndex;
 
-                for (let sw of spokenWords) {
-                    if (!sw) continue;
-                    
-                    // Limit the max search index properly.
-                    // We strictly limit the forward search to `LOOKAHEAD_WINDOW` from our current spot.
+                for (let wordIdx = 0; wordIdx < allSpokenWords.length; wordIdx++) {
+                    if (searchStartIndex >= scriptData.length) break;
+
                     let maxAllowedForward = Math.max(currentIndex + LOOKAHEAD_WINDOW, searchStartIndex + 3);
                     let maxSearchIndex = Math.min(maxAllowedForward, scriptData.length);
                     
-                    for (let i = searchStartIndex; i < maxSearchIndex; i++) {
-                        // Match against the full cleaned word OR any sub-words (to catch hyphenated parts)
-                        if (sw === scriptData[i].clean || scriptData[i].cleanParts.includes(sw)) {
-                            potentialNewIndex = i;
-                            searchStartIndex = i + 1; // Require the *next* spoken word to be further down
-                            break; // Move to processing the next spoken word
+                    let matchFound = false;
+
+                    // Calculate minN: strictly MAX_NGRAM, unless we're near the end of the script
+                    let wordsRemaining = scriptData.length - searchStartIndex;
+                    let minN = Math.max(1, Math.min(MAX_NGRAM, wordsRemaining));
+
+                    // Try matching N-grams from MAX_NGRAM down to minN
+                    for (let n = MAX_NGRAM; n >= minN; n--) {
+                        if (wordIdx + n > allSpokenWords.length) continue;
+
+                        let spokenPhrase = allSpokenWords.slice(wordIdx, wordIdx + n).join('');
+
+                        for (let i = searchStartIndex; i <= maxSearchIndex - n; i++) {
+                            let scriptPhrase = "";
+                            for(let j = 0; j < n; j++) {
+                                scriptPhrase += scriptData[i+j].clean;
+                            }
+
+                            if (spokenPhrase === scriptPhrase) {
+                                potentialNewIndex = i + n - 1;
+                                searchStartIndex = i + n;
+                                wordIdx += n - 1; // Skip the words we just matched
+                                matchFound = true;
+                                break;
+                            }
+                        }
+                        if (matchFound) break;
+                    }
+
+                    // Fallback: Check sub-words (only if we're near the end or phrase length is 1)
+                    if (!matchFound && minN === 1) {
+                        let sw = allSpokenWords[wordIdx];
+                        for (let i = searchStartIndex; i < maxSearchIndex; i++) {
+                            if (scriptData[i].cleanParts.includes(sw)) {
+                                potentialNewIndex = i;
+                                searchStartIndex = i + 1;
+                                matchFound = true;
+                                break;
+                            }
                         }
                     }
                 }
 
                 // 3. Commit the change only if we moved forward
-                // (Prevents the prompter from jittering backwards while speaking)
                 if (potentialNewIndex > currentIndex) {
                     currentIndex = potentialNewIndex;
                     updateHighlight(currentIndex);
@@ -350,10 +393,15 @@
             updateHighlight(currentIndex); // Recalculate scroll position
         });
 
-        // Config Listener
+        // Config Listeners
         lookaheadSlider.addEventListener('input', (e) => {
             LOOKAHEAD_WINDOW = parseInt(e.target.value);
             lookaheadValue.textContent = `${LOOKAHEAD_WINDOW} words`;
+        });
+
+        ngramSlider.addEventListener('input', (e) => {
+            MAX_NGRAM = parseInt(e.target.value);
+            ngramValue.textContent = `${MAX_NGRAM} word${MAX_NGRAM !== 1 ? 's' : ''}`;
         });
 
         // Add some dummy script data for easy testing
