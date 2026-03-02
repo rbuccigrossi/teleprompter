@@ -1,0 +1,8 @@
+{
+  "display": "standalone",
+  "start_url": "./",
+  "scope": "./",
+  "name": "Voice-Controlled Teleprompter",
+  "short_name": "Teleprompter",
+  "background_color": "#000000"
+}
