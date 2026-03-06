@@ -325,21 +325,21 @@
         function updateHighlight(index) {
             if (index >= scriptData.length) return;
 
-            // Update visual states of all words up to the current index
+            // Update visual states of all words
             // (In a very long script, optimizing this loop is good, but standard lengths are fine)
-            for (let i = Math.max(0, index - LOOKAHEAD_WINDOW * 2); i <= index + 5; i++) {
+            for (let i = 0; i < scriptData.length; i++) {
                 let el = document.getElementById(`word-${i}`);
                 if (!el) continue;
 
                 if (i < index) {
-                    // Past words: no longer dimmed
-                    el.className = 'word inline-block opacity-100 text-slate-200';
+                    // Past words: semi-dimmed (compromise)
+                    el.className = 'word inline-block opacity-75 text-slate-400';
                 } else if (i === index) {
                     // Current word: Bright yellow, bold removed to prevent text shifting
                     el.className = 'word inline-block text-yellow-400 scale-105 transform origin-left';
                 } else {
-                    // Future words: Normal
-                    el.className = 'word inline-block opacity-100 text-slate-200';
+                    // Future words: White
+                    el.className = 'word inline-block opacity-100 text-white';
                 }
             }
 
