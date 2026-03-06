@@ -24,15 +24,15 @@ This document outlines the findings from the code review of the Voice-Tracked Te
 *   **Problem:** Removes word boundaries, leading to false positives.
 *   **Action:** Use `.join(' ')` or compare word arrays directly.
 
-### [High Priority] Static Matching Window in Long Utterances
-*   **Observation:** `maxAllowedForward` is anchored to `currentIndex` for the entire `onresult` loop.
-*   **Problem:** If a user speaks a long phrase (longer than the `LOOKAHEAD_WINDOW`), the prompter "hits a wall" and cannot progress further until the next recognition event.
-*   **Action:** Anchor `maxAllowedForward` to the progressively updated `potentialNewIndex` instead of the static `currentIndex`.
+### [DONE] Static Matching Window in Long Utterances
+*   **Observation:** `maxAllowedForward` was anchored to `currentIndex` for the entire `onresult` loop.
+*   **Problem:** If a user speaks a long phrase (longer than the `LOOKAHEAD_WINDOW`), the prompter "hit a wall" and could not progress further until the next recognition event.
+*   **Solution:** Anchored `maxAllowedForward` to the progressively updated `potentialNewIndex`.
 
-### [Medium Priority] Redundant Transcript Processing
-*   **Observation:** Aggregates last 5 results every time, re-processing old words.
+### [DONE] Redundant Transcript Processing
+*   **Observation:** Aggregated last 5 results every time, re-processing old words.
 *   **Problem:** Inefficient and redundant searching.
-*   **Action:** Process only the interim delta or use `isFinal` to clear the buffer.
+*   **Solution:** Processed only starting from `event.resultIndex - 1` to target newly changed speech data efficiently.
 
 ### [Low Priority] Verbal Command Latency
 *   **Observation:** Navigation commands call `recognition.stop()`.
