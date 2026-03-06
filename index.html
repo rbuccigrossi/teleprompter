@@ -196,11 +196,12 @@
                     return;
                 }
 
-                // To support multi-result phrase matching, aggregate words from recent segments
+                // To support multi-result phrase matching, aggregate words from current and previous segments
                 let allSpokenWords = [];
-                // We look at the last few results to catch phrases split by pauses
-                const resultWindow = Math.min(event.results.length, 5);
-                for (let i = event.results.length - resultWindow; i < event.results.length; i++) {
+                // Start from the resultIndex (the first result that changed)
+                // but include the previous one to handle phrases split by pauses.
+                const startIdx = Math.max(0, event.resultIndex - 1);
+                for (let i = startIdx; i < event.results.length; i++) {
                     const transcript = event.results[i][0].transcript;
                     const words = transcript.split(/\s+/)
                         .map(w => w.toLowerCase().replace(/[^a-z0-9]/g, ''))
@@ -219,7 +220,8 @@
                 for (let wordIdx = 0; wordIdx < allSpokenWords.length; wordIdx++) {
                     if (searchStartIndex >= scriptData.length) break;
 
-                    let maxAllowedForward = Math.max(currentIndex + LOOKAHEAD_WINDOW, searchStartIndex + 3);
+                    // Progressively update the window based on how far we've matched in this result
+                    let maxAllowedForward = Math.max(potentialNewIndex + LOOKAHEAD_WINDOW, searchStartIndex + 3);
                     let maxSearchIndex = Math.min(maxAllowedForward, scriptData.length);
                     
                     let matchFound = false;
