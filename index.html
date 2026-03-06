@@ -172,6 +172,30 @@
             recognition.lang = 'en-US';
 
             recognition.onresult = (event) => {
+                // Check for verbal commands
+                const latestTranscript = event.results[event.results.length - 1][0].transcript.toLowerCase();
+                if (latestTranscript.includes('teleprompt restart')) {
+                    currentIndex = 0;
+                    updateHighlight(0);
+                    prompterContent.scrollTop = 0;
+                    recognition.stop();
+                    return;
+                }
+                if (latestTranscript.includes('teleprompt back paragraph')) {
+                    const currParaIdx = scriptData[currentIndex].paraIdx;
+                    const firstWordIdxOfPara = scriptData.findIndex(w => w.paraIdx === currParaIdx);
+
+                    let targetIdx = firstWordIdxOfPara;
+                    if (currentIndex === firstWordIdxOfPara && currParaIdx > 0) {
+                        targetIdx = scriptData.findIndex(w => w.paraIdx === currParaIdx - 1);
+                    }
+
+                    currentIndex = targetIdx;
+                    updateHighlight(currentIndex);
+                    recognition.stop();
+                    return;
+                }
+
                 // To support multi-result phrase matching, aggregate words from recent segments
                 let allSpokenWords = [];
                 // We look at the last few results to catch phrases split by pauses
@@ -273,7 +297,7 @@
             // Split by paragraphs to maintain structure
             const paragraphs = rawText.split(/\n+/);
             
-            paragraphs.forEach(p => {
+            paragraphs.forEach((p, pIdx) => {
                 if(!p.trim()) return;
                 
                 htmlOutput += '<p class="mb-8 text-slate-300 transition-colors duration-300">';
@@ -282,6 +306,7 @@
                 words.forEach(w => {
                     scriptData.push({
                         id: wordIndex,
+                        paraIdx: pIdx,
                         clean: w.toLowerCase().replace(/[^a-z0-9]/g, ''),
                         cleanParts: w.toLowerCase().split(/[^a-z0-9]+/).filter(x => x.length > 0)
                     });
@@ -307,8 +332,8 @@
                 if (!el) continue;
 
                 if (i < index) {
-                    // Past words: dim them
-                    el.className = 'word inline-block opacity-30 text-slate-400';
+                    // Past words: no longer dimmed
+                    el.className = 'word inline-block opacity-100 text-slate-200';
                 } else if (i === index) {
                     // Current word: Bright yellow, bold removed to prevent text shifting
                     el.className = 'word inline-block text-yellow-400 scale-105 transform origin-left';
